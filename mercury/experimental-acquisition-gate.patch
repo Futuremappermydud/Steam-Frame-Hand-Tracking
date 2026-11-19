@@ -1,0 +1,22 @@
+diff --git a/src/xrt/tracking/hand/mercury/hg_sync.hpp b/src/xrt/tracking/hand/mercury/hg_sync.hpp
+--- a/src/xrt/tracking/hand/mercury/hg_sync.hpp
++++ b/src/xrt/tracking/hand/mercury/hg_sync.hpp
+@@ -339,5 +339,6 @@ public:
+ 	float fhl_detector_confidence[2][2] = {};
+ 	float fhl_acquisition_confidence[2] = {};
++	double fhl_experimental_acquisition_threshold = 0.92;
+ 
+ public:
+ 	explicit HandTracking();
+diff --git a/src/xrt/tracking/hand/mercury/hg_sync.cpp b/src/xrt/tracking/hand/mercury/hg_sync.cpp
+--- a/src/xrt/tracking/hand/mercury/hg_sync.cpp
++++ b/src/xrt/tracking/hand/mercury/hg_sync.cpp
+@@ -424,7 +424,7 @@ dispatch_and_process_hand_detections(struct HandTracking *hgt)
+ 		                        infos[1].outputs[hand_idx].hand_detection_confidence) /
+ 		                       float(num_views);
+ 		hgt->fhl_acquisition_confidence[hand_idx] = confidence_sum;
+-		if (confidence_sum < 0.92) {
++		if (confidence_sum < hgt->fhl_experimental_acquisition_threshold) {
+ 			continue;
+ 		}
+ 

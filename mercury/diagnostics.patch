@@ -1,0 +1,135 @@
+diff --git a/src/xrt/tracking/hand/mercury/hg_model.cpp b/src/xrt/tracking/hand/mercury/hg_model.cpp
+index f4f0667..1abaf9a 100644
+--- a/src/xrt/tracking/hand/mercury/hg_model.cpp
++++ b/src/xrt/tracking/hand/mercury/hg_model.cpp
+@@ -355,6 +355,8 @@ run_hand_detection_unsafe(hand_detection_run_info *info)
+ 	ORT_SAFE(wrap, GetTensorMutableData(output_tensors[1], (void **)&cx));
+ 	ORT_SAFE(wrap, GetTensorMutableData(output_tensors[2], (void **)&cy));
+ 	ORT_SAFE(wrap, GetTensorMutableData(output_tensors[3], (void **)&sizee));
++	hgt->fhl_detector_ran[view->view] = true;
++	for (int h = 0; h < 2; ++h) hgt->fhl_detector_confidence[view->view][h] = hand_exists[h];
+ 
+ 	// transform the output from the way the model returns it, to something useful to us.
+ 	for (int hand_idx = 0; hand_idx < 2; hand_idx++) {
+diff --git a/src/xrt/tracking/hand/mercury/hg_sync.cpp b/src/xrt/tracking/hand/mercury/hg_sync.cpp
+index 2f068fa..4c39fcd 100644
+--- a/src/xrt/tracking/hand/mercury/hg_sync.cpp
++++ b/src/xrt/tracking/hand/mercury/hg_sync.cpp
+@@ -423,6 +423,7 @@ dispatch_and_process_hand_detections(struct HandTracking *hgt)
+ 		float confidence_sum = (infos[0].outputs[hand_idx].hand_detection_confidence +
+ 		                        infos[1].outputs[hand_idx].hand_detection_confidence) /
+ 		                       float(num_views);
++		hgt->fhl_acquisition_confidence[hand_idx] = confidence_sum;
+ 		if (confidence_sum < 0.92) {
+ 			continue;
+ 		}
+@@ -786,6 +787,16 @@ callback_process_unsafe(HandTracking *hgt,
+ 	}
+ 
+ 	check_new_user_event(hgt);
++	for (int h = 0; h < 2; ++h) {
++		hgt->fhl_rejection_stage[h] = 0;
++		hgt->fhl_optimizer_ran[h] = false;
++		hgt->fhl_reprojection_error[h] = -1.0f;
++		hgt->fhl_acquisition_confidence[h] = 0;
++	}
++	for (int v = 0; v < 2; ++v) {
++		hgt->fhl_detector_ran[v] = false;
++		for (int h = 0; h < 2; ++h) hgt->fhl_detector_confidence[v][h] = 0;
++	}
+ 
+ 
+ 
+@@ -796,6 +807,8 @@ callback_process_unsafe(HandTracking *hgt,
+ 	}
+ 
+ 	stop_everything_if_hands_are_overlapping(hgt);
++	for (int h = 0; h < 2; ++h) for (int v = 0; v < 2; ++v)
++		hgt->fhl_roi_input_found[h][v] = hgt->views[v].regions_of_interest_this_frame[h].found;
+ 
+ 	//!@todo does this go here?
+ 	// If no hand regions of interest were found anywhere, there's no hand - register that in the state
+@@ -804,6 +817,7 @@ callback_process_unsafe(HandTracking *hgt,
+ 		if (!(hgt->views[0].regions_of_interest_this_frame[hand_idx].found ||
+ 		      hgt->views[1].regions_of_interest_this_frame[hand_idx].found)) {
+ 			hgt->this_frame_hand_detected[hand_idx] = false;
++			hgt->fhl_rejection_stage[hand_idx] = 1; // No ROI after detection/overlap filtering.
+ 		}
+ 	}
+ 
+@@ -874,6 +888,7 @@ callback_process_unsafe(HandTracking *hgt,
+ 			if (!hgt->keypoint_outputs[hand_idx].views[view_idx].active) {
+ 				HG_DEBUG(hgt, "Removing hand %d because keypoint estimator said to!", hand_idx);
+ 				hgt->this_frame_hand_detected[hand_idx] = false;
++				hgt->fhl_rejection_stage[hand_idx] = 2;
+ 			}
+ 		}
+ 
+@@ -936,18 +951,22 @@ callback_process_unsafe(HandTracking *hgt,
+ 		                  *put_in_set,   //
+ 		                  out_hand_size, //
+ 		                  reprojection_error);
++		hgt->fhl_optimizer_ran[hand_idx] = true;
++		hgt->fhl_reprojection_error[hand_idx] = reprojection_error;
+ 
+ 
+ 
+ 		if (reprojection_error > reprojection_error_threshold) {
+ 			HG_DEBUG(hgt, "Reprojection error above threshold!");
+ 			hgt->this_frame_hand_detected[hand_idx] = false;
++			hgt->fhl_rejection_stage[hand_idx] = 3;
+ 			continue;
+ 		}
+ 
+ 		if (hand_too_far(hgt, *put_in_set)) {
+ 			HG_DEBUG(hgt, "Hand too far away");
+ 			hgt->this_frame_hand_detected[hand_idx] = false;
++			hgt->fhl_rejection_stage[hand_idx] = 4;
+ 			continue;
+ 		}
+ 
+@@ -977,6 +996,7 @@ callback_process_unsafe(HandTracking *hgt,
+ 
+ 		hgt->history_hands[hand_idx].push_back(asf);
+ 		hgt->hand_tracked_for_num_frames[hand_idx]++;
++		hgt->fhl_rejection_stage[hand_idx] = 5;
+ 	}
+ 
+ 	// Push our timestamp back as well
+@@ -1013,6 +1033,8 @@ callback_process_unsafe(HandTracking *hgt,
+ 
+ 		for (int hand_idx = 0; hand_idx < 2; hand_idx++) {
+ 			out_xrt_hands[hand_idx]->is_active = still_found[hand_idx];
++			if (hgt->this_frame_hand_detected[hand_idx] && !still_found[hand_idx])
++				hgt->fhl_rejection_stage[hand_idx] = 6;
+ 		}
+ 	}
+ 
+@@ -1020,6 +1042,7 @@ callback_process_unsafe(HandTracking *hgt,
+ 		// Don't send the hand to OpenXR until it's been tracked for 4 frames
+ 		if (hgt->hand_tracked_for_num_frames[hand_idx] < hgt->tuneable_values.num_frames_before_display) {
+ 			out_xrt_hands[hand_idx]->is_active = false;
++			if (hgt->this_frame_hand_detected[hand_idx]) hgt->fhl_rejection_stage[hand_idx] = 7;
+ 		}
+ 	}
+ 
+diff --git a/src/xrt/tracking/hand/mercury/hg_sync.hpp b/src/xrt/tracking/hand/mercury/hg_sync.hpp
+index f36c09d..751f1dc 100644
+--- a/src/xrt/tracking/hand/mercury/hg_sync.hpp
++++ b/src/xrt/tracking/hand/mercury/hg_sync.hpp
+@@ -330,6 +330,15 @@ public:
+ 
+ 	HandSizeRefinement hand_size_refinement{};
+ 
++	// Frame Hand Tracking read-only trace; never consumed by detector/IK decisions.
++	int fhl_rejection_stage[2] = {};
++	bool fhl_roi_input_found[2][2] = {};
++	bool fhl_optimizer_ran[2] = {};
++	float fhl_reprojection_error[2] = {-1.0f, -1.0f};
++	bool fhl_detector_ran[2] = {};
++	float fhl_detector_confidence[2][2] = {};
++	float fhl_acquisition_confidence[2] = {};
++
+ public:
+ 	explicit HandTracking();
+ 	~HandTracking();

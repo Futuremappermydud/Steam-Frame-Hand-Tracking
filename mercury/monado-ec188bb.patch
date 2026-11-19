@@ -1,0 +1,319 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6556fa7..4a75b00 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -110,15 +110,11 @@ find_package(OpenHMD MODULE)
+ 
+ set(OPENCV_COMMON_COMPONENTS
+     core
+-    highgui
+     imgproc
+-    imgcodecs
+-    video
+ 	)
+-
+-find_package(OpenCV QUIET COMPONENTS ${OPENCV_COMMON_COMPONENTS} calib3d features2d CONFIG)
++find_package(OpenCV QUIET COMPONENTS ${OPENCV_COMMON_COMPONENTS} CONFIG)
+ if(NOT OpenCV_FOUND)
+-	find_package(OpenCV COMPONENTS ${OPENCV_COMMON_COMPONENTS} calib features CONFIG)
++	find_package(OpenCV COMPONENTS ${OPENCV_COMMON_COMPONENTS} CONFIG)
+ endif()
+ 
+ find_package(Libusb1 MODULE)
+diff --git a/src/xrt/auxiliary/onnx/onnx_wrapper.cpp b/src/xrt/auxiliary/onnx/onnx_wrapper.cpp
+index 22779a2..5cf9257 100644
+--- a/src/xrt/auxiliary/onnx/onnx_wrapper.cpp
++++ b/src/xrt/auxiliary/onnx/onnx_wrapper.cpp
+@@ -12,6 +12,10 @@
+ 
+ #include "onnx_wrapper.hpp"
+ 
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++
+ 
+ namespace xrt::auxiliary::onnx {
+ 
+@@ -27,6 +31,19 @@ OnnxWrapper::OnnxWrapper(enum u_logging_level log_level, std::string path, std::
+ 	ORT_SAFE(*this, SetSessionGraphOptimizationLevel(opts, ORT_ENABLE_ALL));
+ 	ORT_SAFE(*this, SetIntraOpNumThreads(opts, 1));
+ 
++	// Frame Hand Tracking V10 r4: optional ONNX Runtime tuning from the environment; unset keeps stock.
++	//   FHL_ORT_EP=xnnpack            run supported nodes with the XNNPACK provider (NEON/fp16 kernels)
++	//   FHL_ORT_ALLOW_SPINNING=0|1    session.intra_op.allow_spinning
++	if (const char *spin = std::getenv("FHL_ORT_ALLOW_SPINNING")) {
++		ORT_SAFE(*this, AddSessionConfigEntry(opts, "session.intra_op.allow_spinning", spin));
++	}
++	if (const char *ep = std::getenv("FHL_ORT_EP"); ep && std::string(ep) == "xnnpack") {
++		const char *keys[] = {"intra_op_num_threads"};
++		const char *values[] = {"1"};
++		ORT_SAFE(*this, SessionOptionsAppendExecutionProvider(opts, "XNNPACK", keys, values, 1));
++		std::fprintf(stderr, "onnx_wrapper: XNNPACK execution provider for %s\n", path.c_str());
++	}
++
+ 	ORT_SAFE(*this, CreateEnv(ORT_LOGGING_LEVEL_FATAL, env_name.c_str(), &this->env));
+ 	ORT_SAFE(*this, DisableTelemetryEvents(this->env));
+ 
+diff --git a/src/xrt/tracking/hand/mercury/hg_model.cpp b/src/xrt/tracking/hand/mercury/hg_model.cpp
+index f4f0667..5b9218a 100644
+--- a/src/xrt/tracking/hand/mercury/hg_model.cpp
++++ b/src/xrt/tracking/hand/mercury/hg_model.cpp
+@@ -110,6 +110,22 @@ blackbar(const cv::Mat &in, enum t_camera_orientation rot, cv::Mat &out, xrt_siz
+ 	return ret;
+ }
+ 
++// V9 research: detector input as one rotate+crop+scale warp. Returns detector->image like blackbar().
++static cv::Matx23f
++fhl_rotated_crop(const cv::Mat &in, float angle_deg, float crop, cv::Mat &out, xrt_size out_size)
++{
++	const double w = in.cols, h = in.rows, side = crop * std::min(w, h), s = out_size.w / side;
++	cv::Mat R = cv::getRotationMatrix2D(cv::Point2f(w / 2, h / 2), angle_deg, 1.0);
++	cv::Matx33d A(R.at<double>(0, 0), R.at<double>(0, 1), R.at<double>(0, 2),
++	              R.at<double>(1, 0), R.at<double>(1, 1), R.at<double>(1, 2), 0, 0, 1);
++	cv::Matx33d T(s, 0, -(w / 2 - side / 2) * s, 0, s, -(h / 2 - side / 2) * s, 0, 0, 1);
++	cv::Matx33d go = T * A;
++	cv::Matx23f go23(go(0, 0), go(0, 1), go(0, 2), go(1, 0), go(1, 1), go(1, 2));
++	cv::warpAffine(in, out, go23, cv::Size(out_size.w, out_size.h));
++	cv::Matx33d back = go.inv();
++	return cv::Matx23f(back(0, 0), back(0, 1), back(0, 2), back(1, 0), back(1, 1), back(1, 2));
++}
++
+ static inline int
+ argmax(const float *data, int size)
+ {
+@@ -321,7 +337,10 @@ run_hand_detection_unsafe(hand_detection_run_info *info)
+ 	desired_bin_size.h = kDetectionInputSize;
+ 	desired_bin_size.w = kDetectionInputSize;
+ 
+-	cv::Matx23f go_back = blackbar(orig_data, view->camera_info.camera_orientation, binned_uint8, desired_bin_size);
++	cv::Matx23f go_back = hgt->fhl_detector_custom
++	    ? fhl_rotated_crop(orig_data, hgt->fhl_detector_rotation_deg[view->view], hgt->fhl_detector_crop[view->view],
++	                       binned_uint8, desired_bin_size)
++	    : blackbar(orig_data, view->camera_info.camera_orientation, binned_uint8, desired_bin_size);
+ 
+ 	cv::Mat binned_float_wrapper_mat(cv::Size(kDetectionInputSize, kDetectionInputSize),
+ 	                                 CV_32FC1,             //
+@@ -355,6 +374,8 @@ run_hand_detection_unsafe(hand_detection_run_info *info)
+ 	ORT_SAFE(wrap, GetTensorMutableData(output_tensors[1], (void **)&cx));
+ 	ORT_SAFE(wrap, GetTensorMutableData(output_tensors[2], (void **)&cy));
+ 	ORT_SAFE(wrap, GetTensorMutableData(output_tensors[3], (void **)&sizee));
++	hgt->fhl_detector_ran[view->view] = true;
++	for (int h = 0; h < 2; ++h) hgt->fhl_detector_confidence[view->view][h] = hand_exists[h];
+ 
+ 	// transform the output from the way the model returns it, to something useful to us.
+ 	for (int hand_idx = 0; hand_idx < 2; hand_idx++) {
+@@ -640,7 +661,8 @@ run_keypoint_estimation_unsafe(keypoint_estimation_run_info &info)
+ 	t_camera_model_params dist = info.view->hgdist;
+ 
+ 
+-	float twist = 0;
++	float twist = (hgt->fhl_external_roi_mode || hgt->fhl_detector_custom) ?
++	    hgt->fhl_external_crop_twists[view_idx][hand_idx] : 0;
+ 
+ 	if (output.provenance == ROIProvenance::HAND_DETECTION) {
+ 
+@@ -849,7 +871,7 @@ run_keypoint_estimation_unsafe(keypoint_estimation_run_info &info)
+ 	// When the model is sure, it's _really_ sure.
+ 	// Index was fine with 0.99.
+ 	// North Star seemed to need 0.97.
+-	if (is_hand_explicit < 0.97) {
++	if (is_hand_explicit < hgt->fhl_keypoint_is_hand_min) {  // stock 0.97
+ 		HG_DEBUG(hgt, "Not hand! %f", is_hand_explicit);
+ 		is_hand = false;
+ 	}
+diff --git a/src/xrt/tracking/hand/mercury/hg_sync.cpp b/src/xrt/tracking/hand/mercury/hg_sync.cpp
+index 2f068fa..c924641 100644
+--- a/src/xrt/tracking/hand/mercury/hg_sync.cpp
++++ b/src/xrt/tracking/hand/mercury/hg_sync.cpp
+@@ -423,6 +423,7 @@ dispatch_and_process_hand_detections(struct HandTracking *hgt)
+ 		float confidence_sum = (infos[0].outputs[hand_idx].hand_detection_confidence +
+ 		                        infos[1].outputs[hand_idx].hand_detection_confidence) /
+ 		                       float(num_views);
++		hgt->fhl_acquisition_confidence[hand_idx] = confidence_sum;
+ 		if (confidence_sum < 0.92) {
+ 			continue;
+ 		}
+@@ -786,16 +787,66 @@ callback_process_unsafe(HandTracking *hgt,
+ 	}
+ 
+ 	check_new_user_event(hgt);
++	for (int h = 0; h < 2; ++h) {
++		hgt->fhl_rejection_stage[h] = 0;
++		hgt->fhl_optimizer_ran[h] = false;
++		hgt->fhl_reprojection_error[h] = -1.0f;
++		hgt->fhl_acquisition_confidence[h] = 0;
++	}
++	for (int v = 0; v < 2; ++v) {
++		hgt->fhl_detector_ran[v] = false;
++		for (int h = 0; h < 2; ++h) hgt->fhl_detector_confidence[v][h] = 0;
++	}
+ 
+ 
+ 
+ 	// Every now and then if we're not already tracking both hands, try to detect new hands.
+ 	bool saw_both_hands_last_frame = hgt->last_frame_hand_detected[0] && hgt->last_frame_hand_detected[1];
+-	if (!saw_both_hands_last_frame || hgt->tuneable_values.always_run_detection_model) {
++	for (int h = 0; h < 2; ++h) hgt->fhl_external_roi_use[h] = 0;
++	if (hgt->fhl_external_roi_mode && hgt->fhl_external_policy == 1) {
++		// Acquisition only, mirroring upstream dispatch_and_process_hand_detections: a slot tracked last
++		// frame keeps its pose-predicted ROI; an untracked slot takes the external ROI unless it overlaps
++		// the other slot's ROI (the same physical hand) in either view.
++		bool tracked[2] = {hgt->last_frame_hand_detected[0], hgt->last_frame_hand_detected[1]};
++		for (int h = 0; h < 2; ++h) {
++			if (tracked[h]) {
++				hgt->this_frame_hand_detected[h] = true;
++				hgt->fhl_external_roi_use[h] = 2;
++				continue;
++			}
++			const bool offered = hgt->fhl_external_regions[0][h].found || hgt->fhl_external_regions[1][h].found;
++			bool good_to_go = offered;
++			for (int v = 0; good_to_go && v < 2; ++v) {
++				const hand_region_of_interest &mine = hgt->fhl_external_regions[v][h];
++				// Slot 0 is resolved first, so for slot 1 this already holds slot 0's accepted ROI.
++				const hand_region_of_interest &other = hgt->views[v].regions_of_interest_this_frame[!h];
++				const bool other_resolved = tracked[!h] || h == 1;
++				if (!mine.found || !other_resolved || !other.found) continue;
++				const float limit = tracked[!h] ? hgt->tuneable_values.mpiou_single_detection.val
++				                                : hgt->tuneable_values.mpiou_double_detection.val;
++				if (hand_bounding_boxes_iou(mine, other) > limit) good_to_go = false;
++			}
++			for (int v = 0; v < 2; ++v) {
++				if (good_to_go) hgt->views[v].regions_of_interest_this_frame[h] = hgt->fhl_external_regions[v][h];
++				else hgt->views[v].regions_of_interest_this_frame[h].found = false;
++			}
++			hgt->this_frame_hand_detected[h] = good_to_go;
++			hgt->fhl_external_roi_use[h] = good_to_go ? 1 : (offered ? 3 : 0);
++		}
++	} else if (hgt->fhl_external_roi_mode) {
++		for (int v = 0; v < 2; ++v) for (int h = 0; h < 2; ++h)
++			hgt->views[v].regions_of_interest_this_frame[h] = hgt->fhl_external_regions[v][h];
++		for (int h = 0; h < 2; ++h) {
++			hgt->this_frame_hand_detected[h] = hgt->fhl_external_regions[0][h].found || hgt->fhl_external_regions[1][h].found;
++			hgt->fhl_external_roi_use[h] = hgt->this_frame_hand_detected[h] ? 1 : 0;
++		}
++	} else if (!saw_both_hands_last_frame || hgt->tuneable_values.always_run_detection_model) {
+ 		dispatch_and_process_hand_detections(hgt);
+ 	}
+ 
+ 	stop_everything_if_hands_are_overlapping(hgt);
++	for (int h = 0; h < 2; ++h) for (int v = 0; v < 2; ++v)
++		hgt->fhl_roi_input_found[h][v] = hgt->views[v].regions_of_interest_this_frame[h].found;
+ 
+ 	//!@todo does this go here?
+ 	// If no hand regions of interest were found anywhere, there's no hand - register that in the state
+@@ -804,6 +855,7 @@ callback_process_unsafe(HandTracking *hgt,
+ 		if (!(hgt->views[0].regions_of_interest_this_frame[hand_idx].found ||
+ 		      hgt->views[1].regions_of_interest_this_frame[hand_idx].found)) {
+ 			hgt->this_frame_hand_detected[hand_idx] = false;
++			hgt->fhl_rejection_stage[hand_idx] = 1; // No ROI after detection/overlap filtering.
+ 		}
+ 	}
+ 
+@@ -874,6 +926,7 @@ callback_process_unsafe(HandTracking *hgt,
+ 			if (!hgt->keypoint_outputs[hand_idx].views[view_idx].active) {
+ 				HG_DEBUG(hgt, "Removing hand %d because keypoint estimator said to!", hand_idx);
+ 				hgt->this_frame_hand_detected[hand_idx] = false;
++				hgt->fhl_rejection_stage[hand_idx] = 2;
+ 			}
+ 		}
+ 
+@@ -936,18 +989,22 @@ callback_process_unsafe(HandTracking *hgt,
+ 		                  *put_in_set,   //
+ 		                  out_hand_size, //
+ 		                  reprojection_error);
++		hgt->fhl_optimizer_ran[hand_idx] = true;
++		hgt->fhl_reprojection_error[hand_idx] = reprojection_error;
+ 
+ 
+ 
+ 		if (reprojection_error > reprojection_error_threshold) {
+ 			HG_DEBUG(hgt, "Reprojection error above threshold!");
+ 			hgt->this_frame_hand_detected[hand_idx] = false;
++			hgt->fhl_rejection_stage[hand_idx] = 3;
+ 			continue;
+ 		}
+ 
+ 		if (hand_too_far(hgt, *put_in_set)) {
+ 			HG_DEBUG(hgt, "Hand too far away");
+ 			hgt->this_frame_hand_detected[hand_idx] = false;
++			hgt->fhl_rejection_stage[hand_idx] = 4;
+ 			continue;
+ 		}
+ 
+@@ -977,6 +1034,7 @@ callback_process_unsafe(HandTracking *hgt,
+ 
+ 		hgt->history_hands[hand_idx].push_back(asf);
+ 		hgt->hand_tracked_for_num_frames[hand_idx]++;
++		hgt->fhl_rejection_stage[hand_idx] = 5;
+ 	}
+ 
+ 	// Push our timestamp back as well
+@@ -1013,6 +1071,8 @@ callback_process_unsafe(HandTracking *hgt,
+ 
+ 		for (int hand_idx = 0; hand_idx < 2; hand_idx++) {
+ 			out_xrt_hands[hand_idx]->is_active = still_found[hand_idx];
++			if (hgt->this_frame_hand_detected[hand_idx] && !still_found[hand_idx])
++				hgt->fhl_rejection_stage[hand_idx] = 6;
+ 		}
+ 	}
+ 
+@@ -1020,6 +1080,7 @@ callback_process_unsafe(HandTracking *hgt,
+ 		// Don't send the hand to OpenXR until it's been tracked for 4 frames
+ 		if (hgt->hand_tracked_for_num_frames[hand_idx] < hgt->tuneable_values.num_frames_before_display) {
+ 			out_xrt_hands[hand_idx]->is_active = false;
++			if (hgt->this_frame_hand_detected[hand_idx]) hgt->fhl_rejection_stage[hand_idx] = 7;
+ 		}
+ 	}
+ 
+@@ -1237,6 +1298,15 @@ t_hand_tracking_sync_mercury_create(struct t_stereo_camera_calibration *calib,
+ 	hgt->tuneable_values.min_detection_confidence.min = 0.0f;
+ 	hgt->tuneable_values.min_detection_confidence.step = 0.01f;
+ 	hgt->tuneable_values.min_detection_confidence.val = debug_get_float_option_mercury_min_detection_confidence();
++	// V10 (Frame Hand Tracking): optional overrides; unset keeps stock behaviour.
++	if (const char *v = getenv("FHL_KEYPOINT_IS_HAND_MIN")) {
++		const float x = strtof(v, nullptr);
++		if (x >= 0.5f && x <= 1.0f) hgt->fhl_keypoint_is_hand_min = x;
++	}
++	if (const char *v = getenv("FHL_FRAMES_BEFORE_DISPLAY")) {
++		const long n = strtol(v, nullptr, 10);
++		if (n >= 0 && n <= 60) hgt->tuneable_values.num_frames_before_display = size_t(n);
++	}
+ 
+ 	u_var_add_draggable_f32(hgt, &hgt->tuneable_values.amt_use_depth, "Amount to use depth prediction");
+ 
+diff --git a/src/xrt/tracking/hand/mercury/hg_sync.hpp b/src/xrt/tracking/hand/mercury/hg_sync.hpp
+index f36c09d..8953419 100644
+--- a/src/xrt/tracking/hand/mercury/hg_sync.hpp
++++ b/src/xrt/tracking/hand/mercury/hg_sync.hpp
+@@ -330,6 +330,30 @@ public:
+ 
+ 	HandSizeRefinement hand_size_refinement{};
+ 
++	// Frame Hand Tracking read-only trace; never consumed by detector/IK decisions.
++	int fhl_rejection_stage[2] = {};
++	bool fhl_roi_input_found[2][2] = {};
++	bool fhl_optimizer_ran[2] = {};
++	float fhl_reprojection_error[2] = {-1.0f, -1.0f};
++	bool fhl_detector_ran[2] = {};
++	float fhl_detector_confidence[2][2] = {};
++	float fhl_acquisition_confidence[2] = {};
++	// Explicit research-only external ROI state, never enabled by default.
++	bool fhl_external_roi_mode = false;
++	float fhl_external_crop_twists[2][2] = {};
++	// V7: 0 replaces every ROI each frame (V6); 1 uses external ROIs only to acquire untracked slots.
++	int fhl_external_policy = 0;
++	// V7 diagnostics: per slot, 0 none, 1 external acquisition, 2 kept pose prediction, 3 external rejected (overlap).
++	int fhl_external_roi_use[2] = {};
++	// V9: optional detector input transform per view: rotate about the image centre (OpenCV CCW
++	// degrees), keep a centred square of side crop*min(w,h). Replaces blackbar()'s 90-degree steps.
++	bool fhl_detector_custom = false;
++	// V10: keypoint model "is a hand" cutoff (stock 0.97), from FHL_KEYPOINT_IS_HAND_MIN.
++	float fhl_keypoint_is_hand_min = 0.97f;
++	float fhl_detector_rotation_deg[2] = {};
++	float fhl_detector_crop[2] = {1.0f, 1.0f};
++	hand_region_of_interest fhl_external_regions[2][2] = {};
++
+ public:
+ 	explicit HandTracking();
+ 	~HandTracking();

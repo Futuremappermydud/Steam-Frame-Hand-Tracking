@@ -1,0 +1,14 @@
+/build/
+/panel/build/
+/hand-ray/build/
+/hand-ray/driver/frame_hand_ray/bin/
+/.venv/
+__pycache__/
+*.pyc
+
+/models/fp16/
+
+/calibration/frame-camera-rig.json
+.idea/
+.DS_Store
+/dist/

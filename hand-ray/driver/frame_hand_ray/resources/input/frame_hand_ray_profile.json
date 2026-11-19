@@ -1,0 +1,27 @@
+{
+	"jsonid" : "input_profile",
+	"controller_type" : "frame_hand_ray",
+	"device_class" : "TrackedDeviceClass_Controller",
+	"resource_root" : "frame_hand_ray",
+	"driver_name" : "frame_hand_ray",
+	"remapping" : "{frame_hand_ray}/input/frame_hand_ray_remapping.json",
+	"input_bindingui_mode" : "controller_handed",
+	"should_show_binding_errors" : true,
+	"input_source" : {
+		"/input/trigger" : { "type" : "trigger", "click" : true, "value" : true, "binding_image_point" : [ 50, 50 ], "order" : 1 },
+		"/input/grip" : { "type" : "trigger", "click" : true, "value" : true, "binding_image_point" : [ 50, 50 ], "order" : 2 },
+		"/input/pinch_ext" : { "type" : "trigger", "value" : true, "ready_ext" : true, "binding_image_point" : [ 50, 50 ], "order" : 3 },
+		"/input/grasp_ext" : { "type" : "trigger", "value" : true, "ready_ext" : true, "binding_image_point" : [ 50, 50 ], "order" : 4 },
+		"/input/aim_activate_ext" : { "type" : "trigger", "value" : true, "ready_ext" : true, "binding_image_point" : [ 50, 50 ], "order" : 5 },
+		"/input/laser" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 6 },
+		"/input/pointing" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 7 },
+		"/input/system" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 8 },
+		"/input/skeleton/left" : { "type" : "skeleton", "skeleton" : "/skeleton/hand/left", "side" : "left", "binding_image_point" : [ 50, 50 ] },
+		"/input/skeleton/right" : { "type" : "skeleton", "skeleton" : "/skeleton/hand/right", "side" : "right", "binding_image_point" : [ 50, 50 ] },
+		"/pose/raw" : { "type" : "pose", "binding_image_point" : [ 50, 50 ] },
+		"/pose/tip" : { "type" : "pose", "binding_image_point" : [ 50, 50 ] }
+	},
+	"default_bindings" : [
+		{ "app_key" : "openvr.component.vrcompositor", "binding_url" : "frame_hand_ray_vrcompositor.json" }
+	]
+}

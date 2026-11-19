@@ -1,0 +1,71 @@
+{
+  "to_controller_type": "frame_hand_ray",
+  "layouts": [
+    {
+      "priority": 100,
+      "from_controller_type": "hand_interaction_ext",
+      "simulate_controller_type": false,
+      "simulate_render_model": false,
+      "simulate_HMD": false,
+      "autoremappings": [
+        { "from": "/user/hand/right/input/pinch_ext", "to": "/user/hand/right/input/pinch_ext" },
+        { "from": "/user/hand/right/input/grasp_ext", "to": "/user/hand/right/input/grasp_ext" },
+        { "from": "/user/hand/right/input/aim_activate_ext", "to": "/user/hand/right/input/aim_activate_ext" }
+      ]
+    },
+    {
+      "priority": 90,
+      "from_controller_type": "knuckles",
+      "simulate_controller_type": false,
+      "simulate_render_model": false,
+      "simulate_HMD": false,
+      "autoremappings": [
+        { "from": "/user/hand/right/input/trigger", "to": "/user/hand/right/input/trigger" },
+        { "from": "/user/hand/right/input/grip", "to": "/user/hand/right/input/grip" }
+      ]
+    },
+    {
+      "priority": 85,
+      "from_controller_type": "oculus_touch",
+      "simulate_controller_type": false,
+      "simulate_render_model": false,
+      "simulate_HMD": false,
+      "autoremappings": [
+        { "from": "/user/hand/right/input/trigger", "to": "/user/hand/right/input/trigger" },
+        { "from": "/user/hand/right/input/grip", "to": "/user/hand/right/input/grip" }
+      ]
+    },
+    {
+      "priority": 80,
+      "from_controller_type": "khr_generic_controller",
+      "simulate_controller_type": false,
+      "simulate_render_model": false,
+      "simulate_HMD": false,
+      "autoremappings": [
+        { "from": "/user/hand/right/input/trigger", "to": "/user/hand/right/input/trigger" },
+        { "from": "/user/hand/right/input/grip", "to": "/user/hand/right/input/grip" }
+      ]
+    },
+    {
+      "priority": 20,
+      "from_controller_type": "vive_controller",
+      "simulate_controller_type": false,
+      "simulate_render_model": false,
+      "simulate_HMD": false,
+      "autoremappings": [
+        { "from": "/user/hand/right/input/trigger", "to": "/user/hand/right/input/trigger" },
+        { "from": "/user/hand/right/input/grip", "to": "/user/hand/right/input/grip" }
+      ]
+    },
+    {
+      "priority": 10,
+      "from_controller_type": "khr_simple_controller",
+      "simulate_controller_type": false,
+      "simulate_render_model": false,
+      "simulate_HMD": false,
+      "autoremappings": [
+        { "from": "/user/hand/right/input/select", "to": "/user/hand/right/input/trigger" }
+      ]
+    }
+  ]
+}

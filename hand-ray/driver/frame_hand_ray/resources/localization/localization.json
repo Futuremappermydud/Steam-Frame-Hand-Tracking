@@ -1,0 +1,15 @@
+[
+  {
+    "language_tag": "en_US",
+    "frame_hand_ray": "Hand Ray (Frame Hand Tracking)",
+    "/input/trigger": "Pinch",
+    "/input/grip": "Fist",
+    "/input/pinch_ext": "Pinch (hand interaction)",
+    "/input/grasp_ext": "Grasp (hand interaction)",
+    "/input/aim_activate_ext": "Aim activate (hand interaction)",
+    "/input/laser": "Laser click (pinch on the pointing hand, hold to drag)",
+    "/input/pointing": "Carries the laser",
+    "/input/skeleton/left": "Hand skeleton (left)",
+    "/input/skeleton/right": "Hand skeleton (right)"
+  }
+]
