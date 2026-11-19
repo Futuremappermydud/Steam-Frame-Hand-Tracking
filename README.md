@@ -5,7 +5,7 @@ Use your hands instead of controllers on the **Steam Frame**.
 Point at something with your hand, pinch your thumb and index finger together to click, and keep them pinched
 to drag. Games and apps that support hand tracking also see your whole hand.
 
-This is an early prototype. It has been tested on one headset, so expect rough edges.
+This is an early prototype, based on the hand detection and hand tracking models from [Monado](https://gitlab.freedesktop.org/monado/monado) adopted for Frame' 4 SLAM cameras. It has been tested on one headset, so expect rough edges.
 
 ## Before you install
 
