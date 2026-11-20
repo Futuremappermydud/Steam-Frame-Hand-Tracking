@@ -24,7 +24,18 @@ foreach(_target aux_tracking t_ht_mercury t_ht_mercury_model t_ht_mercury_distor
     endif()
   endforeach()
 endforeach()
-add_library(framehand_mercury SHARED framehand_mercury.cpp)
+# The patched hg_model.cpp includes fhm_nn.h (monado-executorch.patch). Without FHM_NN_CMAKE_DIR the ExecuTorch
+# path is compiled out and FHL_NN_BACKEND=executorch reports an error. FHM_NN_CMAKE_DIR names a CMake project
+# that defines the static library target fhm_nn (fhm_nn.cpp with FHM_EXECUTORCH=1 plus the ExecuTorch runtime).
+target_include_directories(t_ht_mercury PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+set(FHM_NN_CMAKE_DIR "" CACHE PATH "Optional CMake project providing an ExecuTorch-enabled fhm_nn target")
+if(FHM_NN_CMAKE_DIR)
+  add_subdirectory("${FHM_NN_CMAKE_DIR}" "${CMAKE_BINARY_DIR}/fhm_nn")
+  add_library(framehand_mercury SHARED framehand_mercury.cpp)
+  target_link_libraries(framehand_mercury PRIVATE fhm_nn)
+else()
+  add_library(framehand_mercury SHARED framehand_mercury.cpp fhm_nn.cpp)
+endif()
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/diagnostics.patch" _trace_hash)
 target_compile_definitions(framehand_mercury PRIVATE FHM_DIAGNOSTICS_PATCH_SHA256="${_trace_hash}")
 option(FHM_EXPERIMENTAL_GATE "Explicitly enable the separately labeled gate-only research fork" OFF)

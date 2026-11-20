@@ -32,6 +32,7 @@ git -C "$work/monado" clean --quiet -fdx
 git -C "$work/monado" apply --whitespace=nowarn "$here/monado-ec188bb.patch"
 if [ $stock = 0 ]; then
   git -C "$work/monado" apply --whitespace=nowarn "$here/monado-nview.patch"
+  git -C "$work/monado" apply --whitespace=nowarn "$here/monado-executorch.patch"
 fi
 
 deps=$work/deps
@@ -56,7 +57,7 @@ if [ ! -f "$opencv/lib/cmake/opencv4/OpenCVConfig.cmake" ]; then
 fi
 
 rm -rf "$work/build"
-cmake -S "$here" -B "$work/build" -DCMAKE_BUILD_TYPE=Release \
+cmake -S "$here" -B "$work/build" -DCMAKE_BUILD_TYPE=Release ${FHT_CMAKE_ARGS:-} \
   -DCMAKE_C_FLAGS="$flags" -DCMAKE_CXX_FLAGS="$flags" \
   -DMONADO_SOURCE_DIR="$work/monado" \
   -DOpenCV_DIR="$opencv/lib/cmake/opencv4" -DEigen3_DIR="$deps/usr/share/eigen3/cmake" \
@@ -75,6 +76,7 @@ cp "$work/build/libframehand_mercury_v10.so" "$lib/"
 cp "$ort_lib" "$lib/libonnxruntime.so.1.22.1"
 ln -sf libonnxruntime.so.1.22.1 "$lib/libonnxruntime.so.1"
 cp -P "$opencv"/lib/libopencv_core.so* "$opencv"/lib/libopencv_imgproc.so* "$lib/"
+cp -P "$work"/build/fhm_nn/hexecutor-executorch/libhexecutor_et.so* "$lib/" 2> /dev/null || true
 nm -D --defined-only "$lib/libframehand_mercury_v10.so" | grep -q ' T fhm_process$' || { echo 'fhm_process not exported' >&2; exit 1; }
 if LD_LIBRARY_PATH=$lib ldd "$lib/libframehand_mercury_v10.so" | grep 'not found'; then exit 1; fi
 sha256sum "$lib"/libframehand_mercury_v10.so
