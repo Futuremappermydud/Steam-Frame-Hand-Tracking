@@ -33,6 +33,7 @@ git -C "$work/monado" apply --whitespace=nowarn "$here/monado-ec188bb.patch"
 if [ $stock = 0 ]; then
   git -C "$work/monado" apply --whitespace=nowarn "$here/monado-nview.patch"
   git -C "$work/monado" apply --whitespace=nowarn "$here/monado-executorch.patch"
+  git -C "$work/monado" apply --whitespace=nowarn "$here/monado-executorch-const.patch"
 fi
 
 deps=$work/deps
@@ -47,6 +48,7 @@ ln -sf "$ort_lib" "$deps/onnxruntime/lib/libonnxruntime.so"
 opencv=$work/opencv
 if [ ! -f "$opencv/lib/cmake/opencv4/OpenCVConfig.cmake" ]; then
   cmake -S "$deps/opencv-4.6.0" -B "$work/build-opencv" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$opencv" \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DBUILD_LIST=core,imgproc -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF \
     -DBUILD_EXAMPLES=OFF -DBUILD_JAVA=OFF -DBUILD_opencv_python2=OFF -DBUILD_opencv_python3=OFF \
     -DWITH_OPENCL=OFF -DWITH_IPP=OFF -DWITH_TBB=OFF -DWITH_LAPACK=OFF -DWITH_OPENMP=OFF \
@@ -62,7 +64,6 @@ cmake -S "$here" -B "$work/build" -DCMAKE_BUILD_TYPE=Release ${FHT_CMAKE_ARGS:-}
   -DMONADO_SOURCE_DIR="$work/monado" \
   -DOpenCV_DIR="$opencv/lib/cmake/opencv4" -DEigen3_DIR="$deps/usr/share/eigen3/cmake" \
   -DONNXRuntime_ROOT_DIR="$deps/onnxruntime" \
-  -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--version-script=$here/mercury.exports" \
   -DFHM_EXPERIMENTAL_GATE=OFF -DFHM_LIBRARY_BASENAME=framehand_mercury_v10 \
   -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN' \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
